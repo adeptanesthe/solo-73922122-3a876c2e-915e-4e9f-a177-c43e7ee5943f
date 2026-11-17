@@ -146,6 +146,71 @@
       <ol class="history-list" id="history-list"></ol>
       <p class="empty" id="history-empty">还没有确认过前缀。</p>
     </div>
+
+    <div class="panel risk" id="risk-panel">
+      <div class="panel-head">
+        <h2>5. 字数风险分析</h2>
+        <span class="hint">对已推进的连续帧做完整路径精确计算（不剪枝）；连续同字仅在经过 blank 后才多计一个字。</span>
+      </div>
+      <div class="risk-controls">
+        <label class="field">
+          <span>起始帧 <strong id="risk-start-out">0</strong></span>
+          <input type="range" id="risk-start" min="0" max="0" step="1" value="0">
+        </label>
+        <label class="field">
+          <span>区间长度 <strong id="risk-count-out">4</strong> 帧（1～64）</span>
+          <input type="range" id="risk-count" min="1" max="64" step="1" value="4">
+        </label>
+        <label class="field">
+          <span>字数上限 <strong id="risk-limit-out">4</strong> 字（1～16）</span>
+          <input type="range" id="risk-limit" min="1" max="16" step="1" value="4">
+        </label>
+        <div class="field actions">
+          <span>分析区间</span>
+          <div class="row">
+            <button class="primary" id="risk-run" type="button">计算字数风险</button>
+            <span class="risk-badge" id="risk-stale" hidden>结果已过期</span>
+          </div>
+        </div>
+      </div>
+      <p class="hint" id="risk-range-note"></p>
+      <p class="notice" id="risk-zero-note" hidden></p>
+      <p class="error" id="risk-error" hidden></p>
+
+      <div id="risk-result" hidden>
+        <div class="scores" id="risk-cards">
+          <div class="score-card">
+            <span class="score-label">分析区间（帧）</span>
+            <span class="score-value mono" id="risk-meta-interval">—</span>
+          </div>
+          <div class="score-card">
+            <span class="score-label">超限概率 P(字数 &gt; <span id="risk-meta-limit">4</span>)</span>
+            <span class="score-value mono risk-over" id="risk-over">—</span>
+          </div>
+          <div class="score-card">
+            <span class="score-label">区间内最可能字数</span>
+            <span class="score-value mono" id="risk-mode">—</span>
+          </div>
+          <div class="score-card">
+            <span class="score-label">路径总质量（归一化基准）</span>
+            <span class="score-value mono" id="risk-mass">—</span>
+          </div>
+        </div>
+        <table class="beam-table risk-table">
+          <thead>
+            <tr>
+              <th>折叠后字数</th>
+              <th>精确概率</th>
+              <th>对数概率 log P</th>
+              <th class="risk-bar-col">分布</th>
+            </tr>
+          </thead>
+          <tbody id="risk-body"></tbody>
+        </table>
+        <p class="hint" id="risk-footnote"></p>
+      </div>
+      <p class="empty" id="risk-empty">尚未分析：选择已推进帧区间与字数上限后点击「计算字数风险」。</p>
+    </div>
   </section>
 </main>
 

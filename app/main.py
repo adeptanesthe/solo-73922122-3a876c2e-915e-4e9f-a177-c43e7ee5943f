@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from .decoder import DecodeError
 from . import state as state_module
 from .state import SessionError, SessionManager
+from .length_risk import LengthRiskError, compute_length_risk
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -66,6 +67,13 @@ class ConfirmBody(BaseModel):
 
 class UndoBody(BaseModel):
     session_id: str
+
+
+class LengthRiskBody(BaseModel):
+    session_id: str
+    start_frame: int
+    frame_count: int
+    max_chars: int
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +272,43 @@ async def confirm_endpoint(body: ConfirmBody) -> dict:
 async def undo_endpoint(body: UndoBody) -> dict:
     session = _session_or_404(body.session_id)
     return await _run_op(session, state_module.undo)
+
+
+# ---------------------------------------------------------------------------
+# Length-risk analysis (read-only; never touches the decoding session)
+
+
+@app.post("/api/length-risk")
+async def length_risk_endpoint(body: LengthRiskBody) -> dict:
+    """Exact collapsed-length distribution over an advanced frame interval.
+
+    This endpoint is purely analytical: it reads the session's immutable frame
+    arrays and never enqueues work on the session's mutating worker, so it
+    cannot influence advance / confirm / undo, their ordering or their beams.
+    An all-zero frame inside the interval is a normal ``computable: false``
+    response so the client can keep its previous result on screen.
+    """
+    session = _session_or_404(body.session_id)
+
+    def run():
+        with session.lock:
+            advanced = session.next_frame
+            revision = session.revision
+            payload = compute_length_risk(
+                session.probs,
+                session.frames,
+                body.start_frame,
+                body.frame_count,
+                body.max_chars,
+                advanced,
+            )
+        payload["revision"] = revision
+        return payload
+
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, run)
+    except LengthRiskError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

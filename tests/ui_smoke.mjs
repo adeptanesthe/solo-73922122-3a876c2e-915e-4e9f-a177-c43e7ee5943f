@@ -129,7 +129,65 @@ const bodyText = $("beam-body").textContent;
 check("零概率样例无 NaN", !bodyText.includes("NaN"), bodyText.slice(0, 120));
 check("零概率样例显示 -∞", bodyText.includes("-∞") || $("frame-probs").textContent.includes("0.000"));
 
-// 10. no uncaught UI errors
+// 10. length-risk analysis: exact distribution, staleness, all-zero handling
+$("risk-count").value = "4";
+$("risk-count").dispatchEvent(new window.Event("input"));
+$("risk-limit").value = "2";
+$("risk-limit").dispatchEvent(new window.Event("input"));
+check("未计算前显示空态", $("risk-result").hidden === true && !$("risk-empty").hidden);
+$("risk-run").click();
+await until(() => !$("risk-result").hidden, "risk result");
+const probRows = [...$("risk-body").querySelectorAll("tr")];
+check("风险表含 0..上限 行加超限行", probRows.length === 4, `${probRows.length} 行`);
+const sumProb = probRows.reduce((acc, tr) => {
+  const text = tr.children[1].textContent;
+  const value = text.includes("%") ? Number(text.replace("%", "")) / 100 : Number(text);
+  return acc + (Number.isFinite(value) ? value : 0);
+}, 0);
+check("各字数概率与超限合计为 1", Math.abs(sumProb - 1) < 1e-6, sumProb.toFixed(6));
+check("超限行存在", $("risk-body").textContent.includes("超限合计"));
+check("区间元信息显示", $("risk-meta-interval").textContent.includes("4 帧"), $("risk-meta-interval").textContent);
+
+// changing the limit marks the old result stale but keeps it visible
+$("risk-limit").value = "3";
+$("risk-limit").dispatchEvent(new window.Event("input"));
+check("改上限后旧结果标记过期", !$("risk-stale").hidden && $("risk-stale").textContent.includes("过期"),
+  $("risk-stale").textContent);
+check("过期结果仍留在界面", !$("risk-result").hidden && $("risk-body").children.length === 4);
+$("risk-run").click();
+await until(() => $("risk-body").querySelectorAll("tr").length === 5, "risk recomputed");
+await sleep(200);
+check("重算后过期标记消失", $("risk-stale").hidden);
+
+// 11. all-zero frame sample: analysis reports uncomputable and keeps old result
+const allZeroBtn = [...$("sample-buttons").children].find((b) => b.textContent.includes("all_zero"));
+allZeroBtn.click();
+await until(() => $("progress-text").textContent.startsWith("0 / 7"), "all-zero sample loaded");
+$("step-btn").click();
+await until(() => $("progress-text").textContent.startsWith("5 / 7") ||
+  $("progress-text").textContent.startsWith("7 / 7"), "all-zero advanced");
+await sleep(200);
+// computable interval first (frames 0..3, the zero frame is index 3 -> use 0..2)
+$("risk-start").value = "0";
+$("risk-start").dispatchEvent(new window.Event("input"));
+$("risk-count").value = "3";
+$("risk-count").dispatchEvent(new window.Event("input"));
+$("risk-run").click();
+await until(() => !$("risk-result").hidden, "risk on computable interval");
+const savedRows = $("risk-body").querySelectorAll("tr").length;
+check("全零样例的正常区间可计算", savedRows > 0);
+// now include the all-zero frame (index 3)
+$("risk-count").value = "5";
+$("risk-count").dispatchEvent(new window.Event("input"));
+$("risk-run").click();
+await until(() => !$("risk-zero-note").hidden, "all-zero warning shown");
+check("全零帧提示无法计算", $("risk-zero-note").textContent.includes("无法计算"),
+  $("risk-zero-note").textContent);
+check("全零帧时保留上次结果", $("risk-result").hidden === false &&
+  $("risk-body").querySelectorAll("tr").length === savedRows);
+check("全零样例解码无 NaN", !$("beam-body").textContent.includes("NaN"));
+
+// 12. no uncaught UI errors
 check("无未捕获脚本错误", errors.length === 0, errors.join(" | ").slice(0, 200));
 
 const failed = results.filter((r) => !r.ok);

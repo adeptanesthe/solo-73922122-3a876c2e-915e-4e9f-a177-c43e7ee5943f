@@ -16,6 +16,10 @@ interesting CTC situations the workbench cares about:
 ``sample_sparse_zero.json``
     hard zeros (``log 0 = -inf``) for some labels, including a frame whose blank
     probability is exactly 0, so the UI can show ``-∞`` without NaNs.
+``sample_all_zero.json``
+    one frame where every label (blank included) has probability 0: decoding
+    still shows ``-∞`` without NaNs, while the length-risk analysis reports the
+    interval as not computable and keeps the previous result.
 """
 
 from __future__ import annotations
@@ -119,12 +123,32 @@ def sparse_zero_sample():
     }
 
 
+def all_zero_sample():
+    vocab = ["<blank>", "x", "y", "z"]
+    rows = [
+        [0.50, 0.35, 0.10, 0.05],
+        [0.10, 0.75, 0.10, 0.05],
+        [0.80, 0.10, 0.06, 0.04],
+        [0.00, 0.00, 0.00, 0.00],   # fully zero frame: CTC conditional undefined
+        [0.70, 0.15, 0.10, 0.05],
+        [0.20, 0.10, 0.60, 0.10],
+        [0.90, 0.04, 0.04, 0.02],
+    ]
+    return {
+        "name": "含全零帧",
+        "description": "有一帧所有概率均为 0，字数风险分析应提示无法计算并保留上次结果；解码本身仍显示 -∞ 而不出现 NaN。",
+        "vocab": vocab,
+        "frames": rows,
+    }
+
+
 def main() -> None:
     SAMPLES.mkdir(parents=True, exist_ok=True)
     for name, payload in (
         ("sample_repeat.json", repeat_sample()),
         ("sample_blank_heavy.json", blank_heavy_sample()),
         ("sample_sparse_zero.json", sparse_zero_sample()),
+        ("sample_all_zero.json", all_zero_sample()),
     ):
         path = SAMPLES / name
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

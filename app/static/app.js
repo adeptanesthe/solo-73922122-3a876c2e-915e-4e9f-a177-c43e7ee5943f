@@ -55,6 +55,26 @@
     historyEmpty: $("history-empty"),
     busy: $("busy"),
     busyText: $("busy-text"),
+    riskStart: $("risk-start"),
+    riskStartOut: $("risk-start-out"),
+    riskCount: $("risk-count"),
+    riskCountOut: $("risk-count-out"),
+    riskLimit: $("risk-limit"),
+    riskLimitOut: $("risk-limit-out"),
+    riskRun: $("risk-run"),
+    riskStale: $("risk-stale"),
+    riskRangeNote: $("risk-range-note"),
+    riskZeroNote: $("risk-zero-note"),
+    riskError: $("risk-error"),
+    riskResult: $("risk-result"),
+    riskEmpty: $("risk-empty"),
+    riskBody: $("risk-body"),
+    riskOver: $("risk-over"),
+    riskMode: $("risk-mode"),
+    riskMass: $("risk-mass"),
+    riskMetaInterval: $("risk-meta-interval"),
+    riskMetaLimit: $("risk-meta-limit"),
+    riskFootnote: $("risk-footnote"),
   };
 
   const state = {
@@ -70,6 +90,16 @@
     // Behind the scenes: the last shown state is kept while a request is in
     // flight, so a failed operation leaves the subtitles and progress intact.
     peekLive: false,
+    // Length-risk analysis.  `token` identifies the newest request so a slow
+    // earlier calculation can never overwrite a newer one; `stale` marks the
+    // displayed result as outdated after the interval or limit changes.
+    risk: {
+      token: 0,
+      inFlight: false,
+      result: null,
+      stale: false,
+      zeroNote: "",
+    },
   };
 
   // ---------------------------------------------------------------- helpers
@@ -83,6 +113,7 @@
 
   const pct = (value) => {
     if (!Number.isFinite(value)) return "0";
+    if (value === 0) return "0";
     if (value >= 0.01) return (value * 100).toFixed(1) + "%";
     return value.toExponential(2);
   };
@@ -193,6 +224,7 @@
     state.snapshot = null;
     state.loadedSample = sampleName;
     state.peekLive = true;
+    resetRiskPanel();
     applyState(payload, { force: true });
     if (state.snapshot) {
       els.peekFrame.value = "0";
@@ -249,6 +281,7 @@
     renderHistory(snap);
     renderFrameProbs(snap.frame_info);
     els.prefixInput.placeholder = prefix ? `当前前缀：${prefix}` : "例如：啊";
+    updateRiskControls(snap);
     updateButtons();
     updateStatusFromSnapshot();
   }
@@ -527,6 +560,225 @@
     updateStatusFromSnapshot();
   }
 
+  // --------------------------------------------------------- length risk
+
+  function resetRiskPanel() {
+    state.risk.token += 1;
+    state.risk.inFlight = false;
+    state.risk.result = null;
+    state.risk.stale = false;
+    state.risk.zeroNote = "";
+    els.riskStart.value = "0";
+    els.riskCount.value = "4";
+    els.riskLimit.value = "4";
+    els.riskStartOut.textContent = "0";
+    els.riskCountOut.textContent = "4";
+    els.riskLimitOut.textContent = "4";
+    els.riskStale.hidden = true;
+    els.riskStale.classList.remove("over");
+    els.riskRun.textContent = "计算字数风险";
+    els.riskResult.hidden = true;
+    els.riskEmpty.hidden = false;
+    els.riskError.hidden = true;
+    els.riskError.textContent = "";
+    els.riskZeroNote.hidden = true;
+    els.riskZeroNote.textContent = "";
+    els.riskBody.innerHTML = "";
+  }
+
+  // Keep the sliders inside the frames that have actually been advanced.
+  // Advancing more frames only widens the available range, so an existing
+  // selection stays valid and the previous result is not invalidated.
+  function updateRiskControls(snap) {
+    const advanced = snap.next_frame || 0;
+    const total = snap.frame_count || 0;
+    const maxStart = Math.max(0, advanced - 1);
+
+    els.riskStart.max = String(maxStart);
+    if (Number(els.riskStart.value) > maxStart) els.riskStart.value = String(maxStart);
+    els.riskStartOut.textContent = els.riskStart.value;
+
+    const start = Number(els.riskStart.value);
+    const maxCount = Math.min(64, Math.max(1, advanced - start));
+    els.riskCount.max = String(maxCount);
+    if (Number(els.riskCount.value) > maxCount) els.riskCount.value = String(maxCount);
+    if (Number(els.riskCount.value) < 1) els.riskCount.value = "1";
+    els.riskCountOut.textContent = els.riskCount.value;
+    els.riskLimitOut.textContent = els.riskLimit.value;
+
+    if (advanced === 0) {
+      els.riskRangeNote.textContent = "请先推进至少 1 帧，再做字数风险分析。";
+      els.riskRun.disabled = true;
+    } else {
+      const count = Number(els.riskCount.value);
+      els.riskRangeNote.textContent =
+        `可选区间限定在已推进的 0～${advanced} 帧边界内（音频共 ${total} 帧）；` +
+        `当前分析第 ${start} 帧起连续 ${count} 帧。`;
+      // Deliberately not disabled while a calculation is in flight: a newer
+      // click is allowed and its token wins, so a slow earlier answer can
+      // never overwrite the newer result.
+      els.riskRun.disabled = false;
+    }
+    renderRiskStaleBadge();
+  }
+
+  function renderRiskStaleBadge() {
+    const has = !!state.risk.result;
+    if (!has || !state.risk.stale) {
+      els.riskStale.hidden = true;
+      return;
+    }
+    els.riskStale.hidden = false;
+    els.riskStale.textContent = "结果已过期（区间或上限已改动）";
+    els.riskStale.classList.remove("over");
+  }
+
+  // Any parameter change invalidates the displayed result immediately, but the
+  // old table stays on screen marked as stale until a fresh answer arrives.
+  function markRiskStale() {
+    if (state.risk.result) {
+      state.risk.stale = true;
+      renderRiskStaleBadge();
+    }
+    els.riskError.hidden = true;
+  }
+
+  function riskParams() {
+    return {
+      start_frame: Number(els.riskStart.value),
+      frame_count: Number(els.riskCount.value),
+      max_chars: Number(els.riskLimit.value),
+    };
+  }
+
+  async function runLengthRisk() {
+    if (!state.sessionId || !state.snapshot) return;
+    if ((state.snapshot.next_frame || 0) === 0) {
+      els.riskError.hidden = false;
+      els.riskError.textContent = "请先推进至少 1 帧，再做字数风险分析。";
+      return;
+    }
+    const sessionId = state.sessionId;
+    const generation = state.generation;
+    const token = ++state.risk.token;
+    const params = riskParams();
+    state.risk.inFlight = true;
+    els.riskRun.textContent = "计算中…";
+    try {
+      const payload = await api("/api/length-risk", {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId, ...params }),
+      });
+      // A newer request, or a replaced session, wins: discard this reply.
+      if (token !== state.risk.token || generation !== state.generation ||
+          sessionId !== state.sessionId) return;
+      state.risk.inFlight = false;
+      els.riskRun.textContent = "计算字数风险";
+
+      if (payload.computable === false) {
+        // Keep the previous result on screen; only surface the explanation.
+        state.risk.zeroNote = payload.message || "区间含全零帧，无法计算。";
+        els.riskZeroNote.hidden = false;
+        els.riskZeroNote.textContent = state.risk.zeroNote;
+        return;
+      }
+      state.risk.zeroNote = "";
+      els.riskZeroNote.hidden = true;
+      state.risk.result = payload;
+      state.risk.stale = false;
+      renderRiskResult(payload);
+    } catch (error) {
+      if (token !== state.risk.token || generation !== state.generation ||
+          sessionId !== state.sessionId) return;
+      state.risk.inFlight = false;
+      els.riskRun.textContent = "计算字数风险";
+      els.riskError.hidden = false;
+      els.riskError.textContent = `风险分析失败：${error.message}（上次结果保持不变）`;
+    }
+  }
+
+  function renderRiskResult(payload) {
+    els.riskResult.hidden = false;
+    els.riskEmpty.hidden = true;
+    els.riskStale.hidden = true;
+    els.riskStale.classList.remove("over");
+    els.riskError.hidden = true;
+
+    els.riskMetaInterval.textContent =
+      `${payload.start_frame}～${payload.end_frame}（${payload.frame_count} 帧）`;
+    els.riskMetaLimit.textContent = String(payload.max_chars);
+
+    const over = Number(payload.over_limit_prob) || 0;
+    els.riskOver.textContent = pct(over);
+    els.riskOver.classList.toggle("danger", over >= 0.3);
+    els.riskOver.classList.toggle("warn", over > 0 && over < 0.3);
+    els.riskOver.title =
+      `折叠后字数超过 ${payload.max_chars} 字的精确路径概率（完整路径，未剪枝）。`;
+
+    const rows = payload.lengths || [];
+    const best = rows.reduce(
+      (acc, row) => (row.prob > (acc ? acc.prob : -1) ? row : acc), null);
+    els.riskMode.textContent = best ? `${best.length} 字（${pct(best.prob)}）` : "—";
+    els.riskMass.textContent = Number.isFinite(payload.total_mass)
+      ? payload.total_mass.toFixed(6) : "—";
+    els.riskMass.title =
+      "区间全部路径的概率质量之和；逐帧归一化输入下应等于 1，字数分布按它归一化。";
+
+    const maxProb = Math.max(
+      ...rows.map((row) => row.prob), over, 1e-12);
+    els.riskBody.innerHTML = "";
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      if (best && row.length === best.length && row.prob > 0) tr.className = "is-mode";
+      const lenTd = document.createElement("td");
+      lenTd.textContent = `${row.length} 字`;
+      const probTd = document.createElement("td");
+      probTd.className = "num";
+      probTd.textContent = pct(row.prob);
+      const logTd = document.createElement("td");
+      logTd.className = "num";
+      logTd.textContent = row.log_prob === null ? "-∞" : Number(row.log_prob).toFixed(4);
+      const barTd = document.createElement("td");
+      barTd.className = "risk-bar-cell";
+      const track = document.createElement("div");
+      track.className = "risk-bar-track";
+      const fill = document.createElement("div");
+      fill.className = "risk-bar-fill";
+      fill.style.width = `${(100 * row.prob) / maxProb}%`;
+      track.appendChild(fill);
+      barTd.appendChild(track);
+      tr.append(lenTd, probTd, logTd, barTd);
+      els.riskBody.appendChild(tr);
+    });
+    // Over-limit aggregate row.
+    const tr = document.createElement("tr");
+    tr.className = "over-limit";
+    const lenTd = document.createElement("td");
+    lenTd.textContent = `> ${payload.max_chars} 字（超限合计）`;
+    const probTd = document.createElement("td");
+    probTd.className = "num";
+    probTd.textContent = pct(over);
+    const logTd = document.createElement("td");
+    logTd.className = "num";
+    logTd.textContent = payload.over_limit_log_prob === null
+      ? "-∞" : Number(payload.over_limit_log_prob).toFixed(4);
+    const barTd = document.createElement("td");
+    barTd.className = "risk-bar-cell";
+    const track = document.createElement("div");
+    track.className = "risk-bar-track";
+    const fill = document.createElement("div");
+    fill.className = "risk-bar-fill over-fill";
+    fill.style.width = `${(100 * over) / maxProb}%`;
+    track.appendChild(fill);
+    barTd.appendChild(track);
+    tr.append(lenTd, probTd, logTd, barTd);
+    els.riskBody.appendChild(tr);
+
+    els.riskFootnote.textContent =
+      "概率由完整 CTC 路径前向 DP 精确计算（不使用剪枝后的候选）；" +
+      "各行概率与超限合计之和为 1。连续同字未经过 blank 只计一个字。";
+  }
+
   // ------------------------------------------------------------------- wiring
 
   els.beamWidth.addEventListener("input", () => {
@@ -535,6 +787,22 @@
   els.chunkSize.addEventListener("input", () => {
     els.chunkOut.textContent = els.chunkSize.value;
   });
+
+  els.riskStart.addEventListener("input", () => {
+    els.riskStartOut.textContent = els.riskStart.value;
+    // Changing the start may shrink the selectable interval length.
+    if (state.snapshot) updateRiskControls(state.snapshot);
+    markRiskStale();
+  });
+  els.riskCount.addEventListener("input", () => {
+    els.riskCountOut.textContent = els.riskCount.value;
+    markRiskStale();
+  });
+  els.riskLimit.addEventListener("input", () => {
+    els.riskLimitOut.textContent = els.riskLimit.value;
+    markRiskStale();
+  });
+  els.riskRun.addEventListener("click", runLengthRisk);
 
   els.loadBtn.addEventListener("click", () => {
     const vocabFile = els.vocabFile.files[0];
@@ -562,6 +830,7 @@
     state.snapshot = null;
     els.workspace.hidden = true;
     state.loadedSample = null;
+    resetRiskPanel();
     setConnection("idle", "未加载");
     updateButtons();
   });

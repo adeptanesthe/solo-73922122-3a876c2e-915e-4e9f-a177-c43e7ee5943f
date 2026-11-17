@@ -190,4 +190,40 @@ button.sample { padding: 5px 10px; font-size: 12px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ----------------------------------------------------------- length risk */
+.risk { grid-column: 1 / -1; }
+.risk-controls {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: end;
+}
+.risk-controls .field.actions .row { margin-top: 0; flex-wrap: wrap; }
+.risk-badge {
+  font-size: 12px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid rgba(255, 201, 120, .5); color: var(--warn);
+  background: rgba(255, 201, 120, .08); white-space: nowrap;
+}
+.risk-badge.over {
+  border-color: rgba(255, 122, 133, .55); color: var(--danger);
+  background: rgba(255, 122, 133, .08);
+}
+.risk-table { margin-top: 14px; }
+.risk-table tr.over-limit td:first-child { color: var(--danger); font-weight: 650; }
+.risk-table tr.is-mode { background: rgba(79, 209, 197, .09); }
+.risk-bar-col { width: 38%; }
+.risk-bar-cell { width: 100%; }
+.risk-bar-track {
+  height: 8px; border-radius: 99px; background: #0d1116;
+  border: 1px solid var(--line); overflow: hidden;
+}
+.risk-bar-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  min-width: 1px;
+}
+.risk-bar-fill.over-fill { background: linear-gradient(90deg, #ff9a6b, var(--danger)); }
+.risk-over { color: var(--accent); }
+.risk-over.danger { color: var(--danger); }
+.risk-over.warn { color: var(--warn); }
+
 [hidden] { display: none !important; }
